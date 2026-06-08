@@ -1,9 +1,6 @@
 // ============================================================
 // Vivo Gallery API — Cloudflare Workers REST API 端点
-// 暴露 REST API 供外部应用调用
 // ============================================================
-
-// ---------- 路由定义 ----------
 
 interface CFRequest extends Request {
   cf?: { country?: string };
@@ -48,9 +45,10 @@ function parseQuery(url: URL): Record<string, string> {
   return params;
 }
 
-function parseInt(str: string | undefined, defaultVal: number): number {
-  const n = parseInt(str, 10);
-  return isNaN(n) ? defaultVal : n;
+// 用全局 parseInt 避免同名冲突
+function parseNumber(str: string | undefined, defaultVal: number): number {
+  const n = globalThis.parseInt(str, 10);
+  return globalThis.isNaN(n) ? defaultVal : n;
 }
 
 // ---------- API 路由 ----------
@@ -60,32 +58,19 @@ async function handlePosts(
   url: URL,
   db: D1Database
 ): Promise<Response> {
-  // GET /api/posts — 分页获取帖子列表
-  if (method === "GET" && url.pathname === "/api/posts") {
+  // GET /api/posts/recent — 最近 N 个帖子（先匹配，避免被 /api/posts/ 前缀捕获）
+  if (method === "GET" && url.pathname === "/api/posts/recent") {
     const params = parseQuery(url);
-    const page = parseInt(params.page, 1);
-    const pageSize = parseInt(params.pageSize, 20);
-    const offset = (page - 1) * pageSize;
+    const limit = parseNumber(params.limit, 20);
 
     try {
-      // 总数
-      const countResult = await db.prepare("SELECT COUNT(*) as total FROM posts").all();
-      const total = (countResult.results as { total: number }[])[0].total;
-
-      // 分页数据
       const result = await db.prepare(
-        "SELECT * FROM posts ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        "SELECT * FROM posts ORDER BY created_at DESC LIMIT ?"
       )
-        .bind(pageSize, offset)
-        .all<{ post_id: string; title: string; description: string; user_nick: string; signature: string; created_at: string }>();
-
-      return jsonResponse({
-        data: result.results,
-        total,
-        page,
-        pageSize,
-        totalPages: Math.ceil(total / pageSize),
-      });
+        .bind(limit)
+        .all();
+      const rows = (result.results as unknown as Record<string, unknown>[]) || [];
+      return jsonResponse(rows);
     } catch (err) {
       return json({ error: "查询失败", details: String(err) }, 500);
     }
@@ -113,12 +98,13 @@ async function handlePosts(
         "SELECT url FROM images WHERE post_id = ? ORDER BY image_id"
       )
         .bind(postId)
-        .all<{ url: string }>();
+        .all();
+      const imgRows = (imagesResult.results as { url: string }[]) || [];
 
       return jsonResponse({
         data: {
           ...postResult,
-          images: (imagesResult.results || []).map((img) => img.url),
+          images: imgRows.map((img) => img.url),
         },
       });
     } catch (err) {
@@ -126,19 +112,33 @@ async function handlePosts(
     }
   }
 
-  // GET /api/posts/recent — 最近 N 个帖子
-  if (method === "GET" && url.pathname === "/api/posts/recent") {
+  // GET /api/posts — 分页获取帖子列表
+  if (method === "GET" && url.pathname === "/api/posts") {
     const params = parseQuery(url);
-    const limit = parseInt(params.limit, 20);
+    const page = parseNumber(params.page, 1);
+    const pageSize = parseNumber(params.pageSize, 20);
+    const offset = (page - 1) * pageSize;
 
     try {
-      const result = await db.prepare(
-        "SELECT * FROM posts ORDER BY created_at DESC LIMIT ?"
-      )
-        .bind(limit)
-        .all();
+      const countResult = await db.prepare(
+        "SELECT COUNT(*) as total FROM posts"
+      ).all();
+      const total = ((countResult.results as { total: number }[]) || [])[0]?.total ?? 0;
 
-      return jsonResponse(result.results);
+      const result = await db.prepare(
+        "SELECT * FROM posts ORDER BY created_at DESC LIMIT ? OFFSET ?"
+      )
+        .bind(pageSize, offset)
+        .all();
+      const rows = (result.results as Record<string, unknown>[]) || [];
+
+      return jsonResponse({
+        data: rows,
+        total,
+        page,
+        pageSize,
+        totalPages: total > 0 ? globalThis.Math.ceil(total / pageSize) : 0,
+      });
     } catch (err) {
       return json({ error: "查询失败", details: String(err) }, 500);
     }
@@ -154,7 +154,6 @@ async function handleSync(
 ): Promise<Response> {
   // POST /api/sync — 手动触发同步
   if (method === "POST" && url.pathname === "/api/sync") {
-    // 后台执行同步，立即返回
     try {
       const { syncPosts } = await import("./scrape");
       await syncPosts(env);
@@ -178,12 +177,12 @@ async function handleStatus(
       const countResult = await db.prepare(
         "SELECT COUNT(*) as total FROM posts"
       ).all();
-      const total = (countResult.results as { total: number }[])[0].total;
+      const total = ((countResult.results as { total: number }[]) || [])[0]?.total ?? 0;
 
       const imgCountResult = await db.prepare(
         "SELECT COUNT(*) as total FROM images"
       ).all();
-      const imgTotal = (imgCountResult.results as { total: number }[])[0].total;
+      const imgTotal = ((imgCountResult.results as { total: number }[]) || [])[0]?.total ?? 0;
 
       return jsonResponse({
         status: "ok",
@@ -201,7 +200,11 @@ async function handleStatus(
 // ---------- 主入口 ----------
 
 export default {
-  async fetch(request: CFRequest, env: { VIVO_USER_ID: string; DB: D1Database }, ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    request: CFRequest,
+    env: { VIVO_USER_ID: string; DB: D1Database },
+    ctx: ExecutionContext
+  ): Promise<Response> {
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
 
@@ -240,7 +243,11 @@ export default {
   },
 
   // 定时触发器：每30分钟自动爬取
-  async scheduled(_controller: ScheduledController, env: { VIVO_USER_ID: string; DB: D1Database }, _ctx: ExecutionContext): Promise<void> {
+  async scheduled(
+    _controller: ScheduledController,
+    env: { VIVO_USER_ID: string; DB: D1Database },
+    _ctx: ExecutionContext
+  ): Promise<void> {
     const { syncPosts } = await import("./scrape");
     await syncPosts(env);
   },
