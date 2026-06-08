@@ -1,0 +1,18 @@
+{
+  "name": "vivo-gallery-cloudflare",
+  "version": "1.0.0",
+  "description": "Vivo Gallery API on Cloudflare Workers + D1",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create vivo-gallery-db",
+    "db:migrate": "wrangler d1 execute vivo-gallery-db --file src/schema.sql",
+    "db:shell": "wrangler d1 execute vivo-gallery-db --local --command"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "typescript": "^5.3.0",
+    "wrangler": "^3.30.0"
+  }
+}
