@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2024-01-01"
 account_id = "458d9927b069594f4ef7c97674fa4cb2"
 
+# 自定义域名路由
+routes = ["vivo-image.kyeo.top/*"]
+
 # 定时触发器：每30分钟执行一次爬虫
 [triggers]
 crons = ["*/30 * * * *"]
