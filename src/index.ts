@@ -80,7 +80,29 @@ async function handlePosts(
         .bind(limit)
         .all();
       const rows = (result.results as unknown as Record<string, unknown>[]) || [];
-      return jsonResponse(rows);
+
+      // 为每条帖子附加 images 数组（从 images 表读取 URL）
+      const enriched = [];
+      for (const r of rows) {
+        const pid = (r as any).post_id || (r as any).postId || null;
+        if (!pid) {
+          enriched.push({ ...r, images: [] });
+          continue;
+        }
+
+        try {
+          const imgsRes = await db
+            .prepare("SELECT url FROM images WHERE post_id = ? ORDER BY image_id")
+            .bind(pid)
+            .all();
+          const imgRows = (imgsRes.results as { url: string }[]) || [];
+          enriched.push({ ...r, images: imgRows.map((i) => i.url) });
+        } catch (errInner) {
+          enriched.push({ ...r, images: [] });
+        }
+      }
+
+      return jsonResponse(enriched);
     } catch (err) {
       return json({ error: "查询失败", details: String(err) }, 500);
     }
