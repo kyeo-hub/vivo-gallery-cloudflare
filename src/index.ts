@@ -35,6 +35,16 @@ function corsResponse(): Response {
   });
 }
 
+/**
+ * HTML 响应
+ */
+function htmlResponse(html: string, status = 200): Response {
+  return new Response(html, {
+    status,
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
 // ---------- 请求解析 ----------
 
 function parseQuery(url: URL): Record<string, string> {
@@ -214,7 +224,95 @@ export default {
     }
 
     // 路由分发
-    if (url.pathname === "/" || url.pathname === "/api") {
+    if (url.pathname === "/") {
+      const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Vivo Gallery</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--muted:#9aa4b2;--accent:#4f46e5}
+    body{margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:linear-gradient(180deg,#071025 0%,#0b1220 100%);color:#e6eef6}
+    .wrap{max-width:1100px;margin:32px auto;padding:20px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+    h1{margin:0;font-size:1.6rem}
+    p.lead{margin:6px 0 0;color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-top:20px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border-radius:10px;padding:10px;box-shadow:0 6px 18px rgba(2,6,23,0.6);overflow:hidden}
+    .thumb{width:100%;height:160px;object-fit:cover;border-radius:8px;background:#071026}
+    .title{margin:8px 0 0;font-size:0.95rem;color:#dbeafe}
+    .meta{color:var(--muted);font-size:0.85rem}
+    .empty{color:var(--muted);text-align:center;padding:60px 0}
+    footer{margin-top:28px;color:var(--muted);font-size:0.85rem;text-align:center}
+    .controls{display:flex;gap:8px;align-items:center}
+    button{background:var(--accent);border:none;color:white;padding:8px 12px;border-radius:8px;cursor:pointer}
+    input{background:transparent;border:1px solid rgba(255,255,255,0.06);Padding:8px;border-radius:8px;color:inherit}
+    @media (max-width:520px){.thumb{height:120px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Vivo Gallery</h1>
+        <p class="lead">来自 Vivo 相册的最近帖子预览 — 自动同步至 Cloudflare D1</p>
+      </div>
+      <div class="controls">
+        <input id="limit" type="number" min="1" max="100" value="24" style="width:80px" />
+        <button id="refresh">刷新</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="empty">正在加载…</div>
+    </main>
+
+    <footer>使用 API: <a href="/api" style="color:#9ec5ff">/api</a> · 部署于 Cloudflare Workers</footer>
+  </div>
+
+  <script>
+    async function load(limit=24){
+      const main = document.getElementById('main');
+      main.innerHTML = '<div class="empty">加载中…</div>';
+      try{
+        const res = await fetch('/api/posts/recent?limit='+limit);
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        const data = await res.json();
+        if(!Array.isArray(data)) { main.innerHTML='<div class="empty">无数据</div>'; return }
+        if(data.length===0){ main.innerHTML='<div class="empty">没有帖子</div>'; return }
+        const grid = document.createElement('div'); grid.className='grid';
+        for(const item of data){
+          const card = document.createElement('div'); card.className='card';
+          const img = document.createElement('img'); img.className='thumb';
+          const images = item.images || [];
+          img.src = images[0] || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="100%" height="100%" fill="%23071026"/></svg>';
+          img.alt = item.title || 'Vivo 帖子';
+          const t = document.createElement('div'); t.className='title'; t.textContent = item.title || item.post_id || '无标题';
+          const m = document.createElement('div'); m.className='meta'; m.textContent = (item.user_nick||'匿名') + ' · ' + (item.created_at||'')
+          card.appendChild(img); card.appendChild(t); card.appendChild(m);
+          grid.appendChild(card);
+        }
+        main.innerHTML=''; main.appendChild(grid);
+      }catch(err){
+        main.innerHTML = '<div class="empty">加载失败: '+(err.message||err)+'</div>';
+      }
+    }
+
+    document.getElementById('refresh').addEventListener('click', ()=>{
+      const limit = Number(document.getElementById('limit').value) || 24; load(limit);
+    });
+
+    // 首次加载
+    load(Number(document.getElementById('limit').value)||24);
+  </script>
+</body>
+</html>`;
+
+      return htmlResponse(html);
+    }
+
+    if (url.pathname === "/api") {
       return jsonResponse({
         message: "Vivo Gallery API",
         endpoints: {
